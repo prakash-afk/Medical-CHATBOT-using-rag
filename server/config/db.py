@@ -9,5 +9,5 @@ DB_NAME = os.getenv("dbName")
 
 client=MongoClient(MONGO_URI)
 db=client[DB_NAME]
-user_collection=db['users']
+users_collection=db['users']
 
