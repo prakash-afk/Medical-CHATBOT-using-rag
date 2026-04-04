@@ -2,6 +2,7 @@
 Thumbs.db
 
 server/.venv/
+server/.env
 __pycache__/
 *.pyc
 *.pyo
