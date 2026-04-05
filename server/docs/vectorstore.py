@@ -65,6 +65,7 @@ async def load_vectorStore(uploaded_files, role: str, doc_id: str):
                 "doc_id": doc_id,
                 "role": role,
                 "page": chunk.metadata.get("page", 0),
+                "text": chunk.page_content,
             }
             for chunk in chunks
         ]

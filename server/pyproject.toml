@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "bcrypt",
     "fastapi",
+    "langchain-groq>=1.1.2",
     "pydantic",
     "pymongo",
     "python-dotenv",
