@@ -1,11 +1,16 @@
 import os
 from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
-from pinecone import Pinecone
-from langchain_community.vectorstores import Pinecone as PineconeVectorStore
+from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
+from pinecone import Pinecone
+
+SERVER_DIR = Path(__file__).resolve().parents[1]
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
 
 from docs.vectorstore import get_embedding_model
 
@@ -19,8 +24,28 @@ pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 embed_model = get_embedding_model()
 
-vector_store = PineconeVectorStore(index=index, embedding=embed_model, text_key="text")
-retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+
+class PineconeRetriever:
+    def __init__(self, *, top_k: int = 4):
+        self.top_k = top_k
+
+    def invoke(self, query: str) -> list[Document]:
+        query_embedding = embed_model.embed_query(query)
+        results = index.query(
+            vector=query_embedding,
+            top_k=self.top_k,
+            include_metadata=True,
+        )
+        documents: list[Document] = []
+        for match in results.get("matches", []):
+            metadata = dict(match.get("metadata", {}))
+            text = metadata.pop("text", "")
+            if text:
+                documents.append(Document(page_content=text, metadata=metadata))
+        return documents
+
+
+retriever = PineconeRetriever(top_k=4)
 
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3, max_tokens=2048, api_key=GROQ_API_KEY)
 
