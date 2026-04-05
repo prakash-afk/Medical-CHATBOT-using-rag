@@ -42,5 +42,5 @@ context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
 final_prompt = prompt.invoke({"context": context_text, "question": question})
 
 answer = llm.invoke(final_prompt)
-print(answer.content)
+print(answer.content) #print
 
