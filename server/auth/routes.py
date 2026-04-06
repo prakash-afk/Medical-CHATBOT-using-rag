@@ -33,4 +33,8 @@ def signup(req: SignupRequest):
 
 @router.post("/login")
 def login(user: dict = Depends(authenticate)):
-    return {"message": f"Welcome {user['username']}! Your role is {user['role']}."}
+    return {
+        "message": f"Welcome {user['username']}! Your role is {user['role']}.",
+        "username": user["username"],
+        "role": user["role"],
+    }

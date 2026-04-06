@@ -24,6 +24,8 @@ pc = Pinecone(api_key=PINECONE_API_KEY)
 spec = ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
 
 index = pc.Index(PINECONE_INDEX_NAME)
+EMBED_BATCH_SIZE = 20
+EMBED_BATCH_DELAY_SECONDS = 1.0
 
 def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
     if not GOOGLE_API_KEY:
@@ -34,6 +36,28 @@ def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
         google_api_key=GOOGLE_API_KEY,
         output_dimensionality=768,
     )
+
+
+async def embed_texts_in_batches(
+    embed_model: GoogleGenerativeAIEmbeddings, texts: list[str]
+) -> list[list[float]]:
+    embeddings: list[list[float]] = []
+
+    for start in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[start : start + EMBED_BATCH_SIZE]
+        batch_number = (start // EMBED_BATCH_SIZE) + 1
+        total_batches = (len(texts) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+        print(
+            f"Embedding batch {batch_number}/{total_batches} "
+            f"with {len(batch)} chunks..."
+        )
+        batch_embeddings = await asyncio.to_thread(embed_model.embed_documents, batch)
+        embeddings.extend(batch_embeddings)
+
+        if start + EMBED_BATCH_SIZE < len(texts):
+            await asyncio.sleep(EMBED_BATCH_DELAY_SECONDS)
+
+    return embeddings
 
 
 async def load_vectorStore(uploaded_files, role: str, doc_id: str):
@@ -71,7 +95,7 @@ async def load_vectorStore(uploaded_files, role: str, doc_id: str):
         ]
 
         print(f"Embedding {len(texts)} chunks from {file.filename}...")
-        embeddings = await asyncio.to_thread(embed_model.embed_documents, texts)
+        embeddings = await embed_texts_in_batches(embed_model, texts)
 
         print(f"Upserting {len(embeddings)} vectors to Pinecone index '{PINECONE_INDEX_NAME}'...")
         with tqdm(total=len(embeddings), desc=f"Upserting {file.filename}") as progress:

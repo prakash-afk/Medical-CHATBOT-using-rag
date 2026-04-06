@@ -26,6 +26,17 @@ def get_auth() -> HTTPBasicAuth:
     return HTTPBasicAuth(st.session_state.username, st.session_state.password)
 
 
+def get_error_message(res: requests.Response, fallback: str) -> str:
+    try:
+        payload = res.json()
+    except ValueError:
+        text = res.text.strip()
+        if text:
+            return f"{fallback} (HTTP {res.status_code})"
+        return fallback
+    return payload.get("detail") or payload.get("message") or fallback
+
+
 def auth_ui() -> None:
     st.title("Healthcare RBAC RAG")
     st.subheader("Login or Signup")
@@ -50,7 +61,7 @@ def auth_ui() -> None:
                 st.success(f"Welcome {username}")
                 st.rerun()
             else:
-                st.error(res.json().get("detail", "Login failed"))
+                st.error(get_error_message(res, "Login failed"))
 
     with signup_tab:
         new_user = st.text_input("New Username", key="signup_user")
@@ -62,13 +73,13 @@ def auth_ui() -> None:
             if res.status_code == 200:
                 st.success("Signup successful! You can login.")
             else:
-                st.error(res.json().get("detail", "Signup failed"))
+                st.error(get_error_message(res, "Signup failed"))
 
 
 def upload_docs() -> None:
-    st.subheader("Upload PDF for a role")
+    st.subheader("Upload PDF")
+    st.caption("Uploaded PDFs will be available to all logged-in users.")
     uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
-    role_for_doc = st.selectbox("Target role for docs", ["doctor", "nurse", "patient", "other"])
 
     if st.button("Upload Document", use_container_width=True):
         if not uploaded_file:
@@ -76,11 +87,9 @@ def upload_docs() -> None:
             return
 
         files = [("files", (uploaded_file.name, uploaded_file.getvalue(), "application/pdf"))]
-        data = {"role": role_for_doc}
         res = requests.post(
             f"{API_URL}/documents/upload-docs",
             files=files,
-            data=data,
             auth=get_auth(),
             timeout=300,
         )
@@ -92,7 +101,7 @@ def upload_docs() -> None:
                 f"Chunks: {doc_info['chunk_count']}"
             )
         else:
-            st.error(res.json().get("detail", "Upload failed"))
+            st.error(get_error_message(res, "Upload failed"))
 
 
 def chat_interface() -> None:
@@ -119,7 +128,7 @@ def chat_interface() -> None:
                 for src in reply["sources"]:
                     st.write(f"- {src}")
         else:
-            st.error(res.json().get("detail", "Something went wrong."))
+            st.error(get_error_message(res, "Something went wrong."))
 
 
 if not st.session_state.logged_in:
@@ -135,7 +144,7 @@ else:
         st.session_state.logged_in = False
         st.rerun()
 
-    if st.session_state.role == "admin":
+    if st.session_state.role in {"admin", "doctor"}:
         upload_docs()
         st.divider()
 

@@ -1,6 +1,7 @@
+import asyncio
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -14,7 +15,7 @@ if str(SERVER_DIR) not in sys.path:
 
 from docs.vectorstore import get_embedding_model
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+load_dotenv(SERVER_DIR / ".env")
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
@@ -23,31 +24,12 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 embed_model = get_embedding_model()
-
-
-class PineconeRetriever:
-    def __init__(self, *, top_k: int = 4):
-        self.top_k = top_k
-
-    def invoke(self, query: str) -> list[Document]:
-        query_embedding = embed_model.embed_query(query)
-        results = index.query(
-            vector=query_embedding,
-            top_k=self.top_k,
-            include_metadata=True,
-        )
-        documents: list[Document] = []
-        for match in results.get("matches", []):
-            metadata = dict(match.get("metadata", {}))
-            text = metadata.pop("text", "")
-            if text:
-                documents.append(Document(page_content=text, metadata=metadata))
-        return documents
-
-
-retriever = PineconeRetriever(top_k=4)
-
-llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3, max_tokens=2048, api_key=GROQ_API_KEY)
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0.3,
+    max_tokens=2048,
+    api_key=GROQ_API_KEY,
+)
 
 prompt = PromptTemplate(
     template="""
@@ -61,11 +43,51 @@ prompt = PromptTemplate(
     input_variables=["context", "question"],
 )
 
-question = "is the topic of nuclear fusion discussed in this video? if yes then what was discussed"
-retrieved_docs = retriever.invoke(question)
-context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
-final_prompt = prompt.invoke({"context": context_text, "question": question})
 
-answer = llm.invoke(final_prompt)
-print(answer.content) 
+class PineconeRetriever:
+    def __init__(self, *, top_k: int = 4):
+        self.top_k = top_k
 
+    async def invoke(self, query: str, user_role: str | None = None) -> list[Document]:
+        query_embedding = await asyncio.to_thread(embed_model.embed_query, query)
+        query_kwargs = {
+            "vector": query_embedding,
+            "top_k": self.top_k,
+            "include_metadata": True,
+        }
+
+        results = await asyncio.to_thread(index.query, **query_kwargs)
+        documents: list[Document] = []
+        for match in results.get("matches", []):
+            metadata = dict(match.get("metadata", {}))
+            text = metadata.pop("text", "")
+            if text:
+                documents.append(Document(page_content=text, metadata=metadata))
+        return documents
+
+
+retriever = PineconeRetriever(top_k=4)
+
+
+async def answer_query(query: str, user_role: str | None = None) -> dict:
+    retrieved_docs = await retriever.invoke(query)
+    if not retrieved_docs:
+        return {"answer": "No relevant info found", "sources": []}
+
+    context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
+    sources = sorted(
+        {
+            doc.metadata.get("source")
+            for doc in retrieved_docs
+            if doc.metadata.get("source")
+        }
+    )
+    final_prompt = prompt.invoke({"context": context_text, "question": query})
+    answer = await asyncio.to_thread(llm.invoke, final_prompt)
+    return {"answer": answer.content, "sources": sources}
+
+
+if __name__ == "__main__":
+    sample_question = "What are the symptoms of diabetes?"
+    result = asyncio.run(answer_query(sample_question, user_role="admin"))
+    print(result["answer"])
